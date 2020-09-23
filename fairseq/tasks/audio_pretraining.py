@@ -91,15 +91,26 @@ class AudioPretrainingTask(LegacyFairseqTask):
             split (str): name of the split (e.g., train, valid, test)
         """
         manifest = os.path.join(self.args.data, "{}.tsv".format(split))
-        self.datasets[split] = FileAudioDataset(
-            manifest,
-            sample_rate=self.args.sample_rate,
-            max_sample_size=self.args.max_sample_size,
-            min_sample_size=self.args.max_sample_size,
-            min_length=self.args.min_sample_size,
-            pad=self.args.labels is not None or self.args.enable_padding,
-            normalize=self.args.normalize,
-        )
+        if self.args.arch == 'abc':
+            self.datasets[split] = AugmentedFileAudioDataset(
+                manifest,
+                sample_rate=self.args.sample_rate,
+                max_sample_size=self.args.max_sample_size,
+                min_sample_size=self.args.max_sample_size,
+                min_length=self.args.min_sample_size,
+                pad=self.args.labels is not None or self.args.enable_padding,
+                normalize=self.args.normalize,
+            )
+        else:
+            self.datasets[split] = FileAudioDataset(
+                manifest,
+                sample_rate=self.args.sample_rate,
+                max_sample_size=self.args.max_sample_size,
+                min_sample_size=self.args.max_sample_size,
+                min_length=self.args.min_sample_size,
+                pad=self.args.labels is not None or self.args.enable_padding,
+                normalize=self.args.normalize,
+            )
 
         if self.args.labels:
             dict_path = os.path.join(self.args.data, f"dict.{self.args.labels}.txt")
