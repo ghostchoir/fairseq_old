@@ -22,6 +22,7 @@ def collate(
     left_pad_target=False,
     input_feeding=True,
     pad_to_length=None,
+    pad_to_multiple=1,
 ):
     if len(samples) == 0:
         return {}
@@ -31,6 +32,7 @@ def collate(
             [s[key] for s in samples],
             pad_idx, eos_idx, left_pad, move_eos_to_beginning,
             pad_to_length=pad_to_length,
+            pad_to_multiple=pad_to_multiple,
         )
 
     def check_alignment(alignment, src_len, tgt_len):
@@ -197,6 +199,7 @@ class LanguagePairDataset(FairseqDataset):
         num_buckets=0,
         src_lang_id=None,
         tgt_lang_id=None,
+        pad_to_multiple=1,
     ):
         if tgt_dict is not None:
             assert src_dict.pad() == tgt_dict.pad()
@@ -208,6 +211,7 @@ class LanguagePairDataset(FairseqDataset):
         self.tgt = tgt
         self.src_sizes = np.array(src_sizes)
         self.tgt_sizes = np.array(tgt_sizes) if tgt_sizes is not None else None
+        self.sizes = np.vstack((self.src_sizes, self.tgt_sizes)).T if self.tgt_sizes is not None else self.src_sizes
         self.src_dict = src_dict
         self.tgt_dict = tgt_dict
         self.left_pad_source = left_pad_source
@@ -256,6 +260,7 @@ class LanguagePairDataset(FairseqDataset):
             ]
         else:
             self.buckets = None
+        self.pad_to_multiple = pad_to_multiple
 
     def get_batch_shapes(self):
         return self.buckets
@@ -344,6 +349,7 @@ class LanguagePairDataset(FairseqDataset):
             left_pad_target=self.left_pad_target,
             input_feeding=self.input_feeding,
             pad_to_length=pad_to_length,
+            pad_to_multiple=self.pad_to_multiple,
         )
         if self.src_lang_id is not None or self.tgt_lang_id is not None:
             src_tokens = res['net_input']['src_tokens']
@@ -416,21 +422,9 @@ class LanguagePairDataset(FairseqDataset):
             np.array: filtered sample array
             list: list of removed indices
         """
-        if max_sizes is None:
-            return indices, []
-        if type(max_sizes) in (int, float):
-            max_src_size, max_tgt_size = max_sizes, max_sizes
-        else:
-            max_src_size, max_tgt_size = max_sizes
-        if self.tgt_sizes is None:
-            ignored = indices[self.src_sizes[indices] > max_src_size]
-        else:
-            ignored = indices[(self.src_sizes[indices] > max_src_size) |
-                              (self.tgt_sizes[indices] > max_tgt_size)]
-        if len(ignored) > 0:
-            if self.tgt_sizes is None:
-                indices = indices[self.src_sizes[indices] <= max_src_size]
-            else:
-                indices = indices[(self.src_sizes[indices] <= max_src_size) &
-                                  (self.tgt_sizes[indices] <= max_tgt_size)]
-        return indices, ignored.tolist()
+        return data_utils.filter_paired_dataset_indices_by_size(
+            self.src_sizes,
+            self.tgt_sizes,
+            indices,
+            max_sizes,
+        )
