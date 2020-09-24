@@ -24,6 +24,8 @@ from fairseq.modules import (
 from fairseq.modules.transformer_sentence_encoder import init_bert_params
 from fairseq.utils import buffered_arange
 
+from typing import Tuple, Iterator
+
 
 @register_model("abc")
 class ABCModel(BaseFairseqModel):
