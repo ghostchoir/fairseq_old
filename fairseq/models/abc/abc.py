@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from typing import List, Tuple
+
 from fairseq import utils
 from fairseq.data.data_utils import compute_mask_indices
 from fairseq.models import BaseFairseqModel, register_model, register_model_architecture
@@ -511,6 +513,15 @@ class ABCModel(BaseFairseqModel):
         
         self.target_params += list(self.final_proj_target.parameters())
     
+    
+    def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Tensor]]:
+        gen = self._named_members(
+            lambda module: module._parameters.items(),
+            prefix=prefix, recurse=recurse)
+        for elem in gen:
+            if elem[1] not in self.target_params:
+                yield elem
+    
     def update_target(self):
         decay = 1 - (1 - self.base_decay) * (np.cos(np.pi * self.step / self.total_steps) + 1) / 2.0
         self.step += 1
@@ -785,6 +796,12 @@ class ABCModel(BaseFairseqModel):
     #    return result["x"], result["padding_mask"]
     
     def forward(self, source, padding_mask=None, mask=True, features_only=False):
+        
+        if self.step != 0:
+            self.update_target()
+            
+        self.step += 1
+        
         result_0 = self.prediction(source[0], padding_mask, mask, features_only)
         result_1 = self.prediction(source[1], padding_mask, mask, features_only)
         result_target_0 = self.target_prediction(source[0], padding_mask, mask, features_only)

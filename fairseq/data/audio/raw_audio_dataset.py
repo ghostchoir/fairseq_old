@@ -220,6 +220,67 @@ class AugmentedFileAudioDataset(FileAudioDataset):
             normalize=normalize,
         )
         
+        self.pre_transform = Compose([
+            AddGaussianNoise(min_amplitude=1e-3, max_amplitude=1e-2, p=0.5),
+            ClippingDistortion(min_percentile_threshold=10, max_percentile_threshold=40, p=0.2),
+        ])
+        
+        class RandomReverb:
+            reverberance_min: int = 50
+            reverberance_max: int = 50
+            damping_min: int = 50
+            damping_max: int = 50
+            room_scale_min: int = 0
+            room_scale_max: int = 100
+            p = 0.5
+    
+            def __call__(self):
+                prob = np.random.random_sample()
+                
+                if prob < self.p:
+                    reverberance = np.random.randint(self.reverberance_min, self.reverberance_max + 1)
+                    damping = np.random.randint(self.damping_min, self.damping_max + 1)
+                    room_scale = np.random.randint(self.room_scale_min, self.room_scale_min + 1)
+                else:
+                    reverberance = 0
+                    damping = 0
+                    room_scale = 0
+                return [reverberance, damping, room_scale]
+        
+        class RandomTimeDropout:
+            ms_min = 0
+            ms_max = 200
+            p = 0.5
+            
+            def __call__(self):
+                prob = np.random.random_sample()
+                
+                if prob < self.p:
+                    ms = np.random.randint(self.msmin, self.ms_max + 1)
+                else:
+                    ms = 0
+                
+                return ms
+            
+        class RandomClip:
+            factor_min = 0.0
+            factor_max = 1.0
+            p = 0.2
+            
+            def __call__(self):
+                prob = np.random.random_sample()
+                
+                if prob < self.p:
+                    ratio = np.random.triangular(self.factor_min, self.factor_max, self.factor_max)
+                else:
+                    ratio = 0.0
+                return ratio
+        
+        random_reverb = RandomReverb()
+        random_clip = RandomClip()
+        random_time_dropout = RandomTimeDropout()
+        self.post_transform = augment.EffectChain().reverb(random_reverb).channels(1).clip(random_clip).time_dropout(random_time_dropout)
+        
     def collater(self, samples):
         samples = [
             s
@@ -264,67 +325,6 @@ class AugmentedFileAudioDataset(FileAudioDataset):
         if self.pad:
             input["padding_mask"] = padding_mask
         return {"id": torch.LongTensor([s["id"] for s in samples]), "net_input": input}
-        
-    self.pre_transform = Compose([
-        AddGaussianNoise(min_amplitude=1e-3, max_amplitude=1e-2, p=0.5),
-        ClippingDistortion(min_percentile_threshold=10, max_percentile_threshold=40, p=0.2),
-    ])
-    
-    class RandomReverb:
-        reverberance_min: int = 50
-        reverberance_max: int = 50
-        damping_min: int = 50
-        damping_max: int = 50
-        room_scale_min: int = 0
-        room_scale_max: int = 100
-        p = 0.5
-
-        def __call__(self):
-            prob = np.random.random_sample()
-            
-            if prob < self.p:
-                reverberance = np.random.randint(self.reverberance_min, self.reverberance_max + 1)
-                damping = np.random.randint(self.damping_min, self.damping_max + 1)
-                room_scale = np.random.randint(self.room_scale_min, self.room_scale_min + 1)
-            else:
-                reverberance = 0
-                damping = 0
-                room_scale = 0
-        return [reverberance, damping, room_scale]
-    
-    class RandomTimeDropout:
-        ms_min = 0
-        ms_max = 200
-        p = 0.5
-        
-        def __call__(self):
-             prob = np.random.random_sample()
-            
-            if prob < self.p:
-                ms = np.random.randint(self.msmin, self.ms_max + 1)
-            else:
-                ms = 0
-            
-            return ms
-        
-    class RandomClip:
-        factor_min = 0.0
-        factor_max = 1.0
-        p = 0.2
-        
-        def __call__(self):
-            prob = np.random.random_sample()
-            
-            if prob < self.p:
-                ratio = np.random.triangular(self.factor_min, self.factor_max, self.factor_max)
-            else:
-                ratio = 0.0
-            return ratio
-    
-    random_reverb = RandomReverb()
-    random_clip = RandomClip()
-    random_time_dropout = RandomTimeDropout()
-    self.post_transform = augment.EffectChain().reverb(random_reverb).channels(1).clip(random_clip).time_dropout(random_time_dropout)
         
     def __getitem__(self, index):
         import soundfile as sf
