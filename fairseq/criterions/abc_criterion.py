@@ -35,7 +35,7 @@ class ABCCriterion(FairseqCriterion):
         """
         
         # B x T x C
-        result_0, result_1, result_target_0, result_target_1 = model(**sample(['net_input']))
+        result_0, result_1, result_target_0, result_target_1 = model(**sample['net_input'])
         
         online_pred_0 = result_0["x"]
         online_pred_1 = result_1["x"]
@@ -81,8 +81,14 @@ class ABCCriterion(FairseqCriterion):
         }
                     
         for lk in self.log_keys:
-            if lk in net_output:
-                logging_output[lk] = float((net_output[lk]))
+            if lk in result_0:
+                logging_output[lk+'_online_0'] = float((result_0[lk]))
+            if lk in result_1:
+                logging_output[lk+'_online_0'] = float((result_1[lk]))
+            if lk in result_target_0:
+                logging_output[lk+'_target_0'] = float((result_target_0[lk]))
+            if lk in result_target_1:
+                logging_output[lk+'_target_1'] = float((result_target_1[lk]))
 
         if len(losses) > 1:
             for i, l in enumerate(losses):

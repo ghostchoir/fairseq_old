@@ -8,7 +8,7 @@
 import os
 import sys
 
-from fairseq.data import FileAudioDataset, Dictionary, AddTargetDataset
+from fairseq.data import FileAudioDataset, AugmentedFileAudioDataset, Dictionary, AddTargetDataset
 from . import LegacyFairseqTask, register_task
 
 

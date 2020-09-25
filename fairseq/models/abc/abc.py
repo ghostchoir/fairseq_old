@@ -24,7 +24,9 @@ from fairseq.modules import (
 from fairseq.modules.transformer_sentence_encoder import init_bert_params
 from fairseq.utils import buffered_arange
 
+from torch import Tensor
 from typing import Tuple, Iterator
+import copy
 
 
 @register_model("abc")
@@ -361,6 +363,9 @@ class ABCModel(BaseFairseqModel):
         feature_enc_layers = eval(args.conv_feature_layers)
         self.embed = feature_enc_layers[-1][0]
 
+        self.online_params = []
+        self.target_params = []
+        
         self.feature_extractor = ConvFeatureExtractionModel(
             conv_layers=feature_enc_layers,
             dropout=0.0,
@@ -368,17 +373,21 @@ class ABCModel(BaseFairseqModel):
             conv_bias=args.conv_bias,
         )
         
-        self.target_params = []
+        self.feature_extractor_target = ConvFeatureExtractionModel(
+            conv_layers=feature_enc_layers,
+            dropout=0.0,
+            mode=args.extractor_mode,
+            conv_bias=args.conv_bias,
+        )
         
-        self.feature_extractor_target = copy.deepcopy(self.feature_extractor)
-        
+        self.online_params += list(self.feature_extractor.parameters())
         self.target_params += list(self.feature_extractor_target.parameters())
 
-        self.post_extract_proj = (
-            nn.Linear(self.embed, args.encoder_embed_dim)
-            if self.embed != args.encoder_embed_dim and not args.quantize_input
-            else None
-        )
+        if self.embed != args.encoder_embed_dim and not args.quantize_input:
+            self.post_extract_proj = (
+                nn.Linear(self.embed, args.encoder_embed_dim)
+            )
+            self.online_params += list(self.post_extract_proj.parameters())
         
         if self.embed != args.encoder_embed_dim and not args.quantize_input:
             self.post_extract_proj_target = (
@@ -427,9 +436,19 @@ class ABCModel(BaseFairseqModel):
                 time_first=True,
             )
             
+            
+            
             if not args.shared_quantizer:
-                self.quantizer_target = copy.deepcopy(self.quantizer)
-                
+                self.quantizer_target = GumbelVectorQuantizer(
+                    dim=self.embed,
+                    num_vars=args.latent_vars,
+                    temp=eval(args.latent_temp),
+                    groups=args.latent_groups,
+                    combine_groups=False,
+                    vq_dim=vq_dim,
+                    time_first=True,
+                )
+                self.online_params += list(self.quantizer.parameters())
                 self.target_params += list(self.quantizer_target.parameters())
                 
             ### TODO: separate project_q?
@@ -442,7 +461,7 @@ class ABCModel(BaseFairseqModel):
                 vq_dim = final_dim
                 self.input_quantizer = self.quantizer
                 if not args.shared_quantizer:
-                    self.input_quantizer = self.quantizer_target
+                    self.input_quantizer_target = self.quantizer_target
             else:
                 vq_dim = (
                     args.latent_dim if args.latent_dim > 0 else args.encoder_embed_dim
@@ -458,7 +477,16 @@ class ABCModel(BaseFairseqModel):
                 )
                 
                 if not args.shared_quantizer:
-                    self.input_quantizer_target = copy.deepcopy(self.input_quantizer)
+                    self.input_quantizer_target = GumbelVectorQuantizer(
+                        dim=self.embed,
+                        num_vars=args.latent_vars,
+                        temp=eval(args.latent_temp),
+                        groups=args.latent_groups,
+                        combine_groups=False,
+                        vq_dim=vq_dim,
+                        time_first=True,
+                    )
+                    self.online_params += list(self.input_quantizer.parameters())
                     self.target_params += list(self.input_quantizer_target.parameters())
                     
             self.project_inp = nn.Linear(vq_dim, args.encoder_embed_dim)
@@ -468,7 +496,10 @@ class ABCModel(BaseFairseqModel):
         )
         
         if not args.shared_emb:
-            self.mask_emb_target = copy.deepcopy(self.mask_emb)
+            self.mask_emb_target = nn.Parameter(
+                torch.FloatTensor(args.encoder_embed_dim).uniform_()
+            )
+            self.online_params += list(self.mask_emb.parameters())
             self.target_params += list(self.mask_emb_target.parameters())
 
         if args.mlp_encoder:
@@ -478,26 +509,17 @@ class ABCModel(BaseFairseqModel):
                 nn.ReLU(inplace=True),
                 nn.Linaer(args.byol_hidden_dim, final_dim)
             )
+            self.encoder_target = nn.Sequential(
+                nn.Linear(args.encoder_embed_dim, args.byol_hidden_dim),
+                nn.BatchNorm1d(args.byol_hidden_dim),
+                nn.ReLU(inplace=True),
+                nn.Linaer(args.byol_hidden_dim, final_dim)
+            )
         else:
             self.encoder = TransformerEncoder(args)
+            self.encoder_target = TransformerEncoder(args)
         
-        ### TODO: Transformer predictor?
-        if args.mlp_predictor:
-            self.predictor = nn.Sequential(
-                nn.Linear(final_dim, args.byol_hidden_dim),
-                nn.BatchNorm1d(args.byol_hidden_dim),
-                nn.ReLU(inplace=True),
-                nn.Linaer(args.byol_hidden_dim, final_dim)
-            )
-        else:
-            self.predictor = nn.Sequential(
-                nn.Linear(final_dim, args.byol_hidden_dim),
-                nn.BatchNorm1d(args.byol_hidden_dim),
-                nn.ReLU(inplace=True),
-                nn.Linaer(args.byol_hidden_dim, final_dim)
-            )
-            
-        self.encoder_target = copy.deepcopy(self.encoder)
+        self.online_params += list(self.encoder.parameters())
         self.target_params += list(self.encoder_target.parameters())
         
         self.layer_norm = LayerNorm(self.embed)
@@ -507,22 +529,46 @@ class ABCModel(BaseFairseqModel):
             self.target_glu = nn.Sequential(
                 nn.Linear(final_dim, final_dim * 2), nn.GLU()
             )
-            self.target_glu_target = copy.deepcopy(self.target_glu)
+            self.target_glu_target = nn.Sequential(
+                nn.Linear(final_dim, final_dim * 2), nn.GLU()
+            )
+            self.online_params += list(self.target_glu.parameters())
             self.target_params += list(self.target_glu_target.parameters())
 
         self.final_proj = nn.Linear(args.encoder_embed_dim, final_dim)
-        self.final_proj_target = copy.deepcopy(self.final_proj)
+        self.final_proj_target = nn.Linear(args.encoder_embed_dim, final_dim)
         
+        self.online_params += list(self.final_proj.parameters())
         self.target_params += list(self.final_proj_target.parameters())
+        
+        ### TODO: Transformer prediction network?
+        if args.mlp_prediction:
+            self.prediction = MLPPrediction(final_dim, args.byol_hidden_dim)
+            #self.prediction = nn.Sequential(
+            #    nn.Linear(final_dim, args.byol_hidden_dim),
+            #    nn.BatchNorm1d(args.byol_hidden_dim),
+            #    nn.ReLU(inplace=True),
+            #    nn.Linear(args.byol_hidden_dim, final_dim)
+            #)
+        else:
+            self.prediction = MLPPrediction(final_dim, args.byol_hidden_dim)
+            #self.prediction = nn.Sequential(
+            #    nn.Linear(final_dim, args.byol_hidden_dim),
+            #    nn.BatchNorm1d(args.byol_hidden_dim),
+            #    nn.ReLU(inplace=True),
+            #    nn.Linear(args.byol_hidden_dim, final_dim)
+            #)
+            
+        for param in self.target_params:
+            param.requires_grad = False
     
-    
-    def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Tensor]]:
-        gen = self._named_members(
-            lambda module: module._parameters.items(),
-            prefix=prefix, recurse=recurse)
-        for elem in gen:
-            if elem[1] not in self.target_params:
-                yield elem
+    #def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Tensor]]:
+    #    gen = self._named_members(
+    #        lambda module: module._parameters.items(),
+    #        prefix=prefix, recurse=recurse)
+    #    for elem in gen:
+    #        if elem[1] not in self.target_params:
+    #            yield elem
     
     def update_target(self):
         decay = 1 - (1 - self.base_decay) * (np.cos(np.pi * self.step / self.total_steps) + 1) / 2.0
@@ -546,24 +592,27 @@ class ABCModel(BaseFairseqModel):
 
         return cls(args)
     
-    def apply_mask(self, x, padding_mask):
+    def apply_mask(self, x, padding_mask, mask_indices=None):
         B, T, C = x.shape
-        if self.mask_prob > 0:
-            mask_indices = compute_mask_indices(
-                (B, T),
-                padding_mask,
-                self.mask_prob,
-                self.mask_length,
-                self.mask_selection,
-                self.mask_other,
-                min_masks=2,
-                no_overlap=self.no_mask_overlap,
-                min_space=self.mask_min_space,
-            )
-            mask_indices = torch.from_numpy(mask_indices).to(x.device)
-            x[mask_indices] = self.mask_emb
+        if mask_indices is None:
+            if self.mask_prob > 0:
+                mask_indices = compute_mask_indices(
+                    (B, T),
+                    padding_mask,
+                    self.mask_prob,
+                    self.mask_length,
+                    self.mask_selection,
+                    self.mask_other,
+                    min_masks=2,
+                    no_overlap=self.no_mask_overlap,
+                    min_space=self.mask_min_space,
+                )
+                mask_indices = torch.from_numpy(mask_indices).to(x.device)
+                x[mask_indices] = self.mask_emb
+            else:
+                mask_indices = None
         else:
-            mask_indices = None
+            x[mask_indices] = self.mask_emb
 
         if self.mask_channel_prob > 0:
             mask_channel_indices = compute_mask_indices(
@@ -594,10 +643,10 @@ class ABCModel(BaseFairseqModel):
         return self.quantizer.forward_idx(x)
 
     def extract_features(self, source, padding_mask, mask=False):
-        res = self.forward(source[0], padding_mask, mask=mask, features_only=True)
+        res = self.forward(source[0], padding_mask[0], mask=mask, features_only=True)
         return res["x"], res["padding_mask"]
     
-    def prediction(self, source, padding_mask=None, mask=True):
+    def predict(self, source, padding_mask=None, mask=True, features_only=False, mask_indices=None):
         if self.feature_grad_mult > 0:
             features = self.feature_extractor(source)
             if self.feature_grad_mult != 1.0:
@@ -622,6 +671,7 @@ class ABCModel(BaseFairseqModel):
         if self.post_extract_proj is not None:
             features = self.post_extract_proj(features)
 
+        #print("online feature", features.size())
         features = self.dropout_input(features)
         unmasked_features = self.dropout_features(unmasked_features)
 
@@ -640,7 +690,7 @@ class ABCModel(BaseFairseqModel):
             features = self.project_inp(features)
 
         if mask:
-            x, mask_indices = self.apply_mask(features, padding_mask)
+            x, mask_indices = self.apply_mask(features, padding_mask, mask_indices)
             if mask_indices is not None:
                 y = unmasked_features[mask_indices].view(
                     unmasked_features.size(0), -1, unmasked_features.size(-1)
@@ -653,7 +703,7 @@ class ABCModel(BaseFairseqModel):
             mask_indices = None
             
         x = self.encoder(x, padding_mask=padding_mask)
-
+        #print("online encoded", x.size())
         if features_only:
             return {"x": x, "padding_mask": padding_mask}
 
@@ -669,9 +719,9 @@ class ABCModel(BaseFairseqModel):
 
         else:
             y = self.project_q(y)
-
+        #print("online before masking", x.size())
         x = x[mask_indices].view(x.size(0), -1, x.size(-1))
-
+        #print("online after masking", x.size())
         if self.target_glu:
             y = self.target_glu(y)
             negs = self.target_glu(negs)
@@ -679,6 +729,9 @@ class ABCModel(BaseFairseqModel):
         x = self.final_proj(x)
         #x = self.compute_preds(x, y, negs)
 
+        #print("online before prediction", x.size())
+        x = self.prediction(x)
+        
         result = {"x": x, "padding_mask": padding_mask, "features_pen": features_pen}
 
         if prob_ppl is not None:
@@ -687,9 +740,9 @@ class ABCModel(BaseFairseqModel):
             result["num_vars"] = num_vars
             result["temp"] = curr_temp
 
-        return result
+        return result, mask_indices
     
-    def target_prediction(self, source, padding_mask=None, mask=True):
+    def target_predict(self, source, padding_mask=None, mask=True, mask_indices=None):
         
         with torch.no_grad():
             if self.feature_grad_mult > 0:
@@ -713,9 +766,9 @@ class ABCModel(BaseFairseqModel):
                 padding_mask = padding_mask.view(padding_mask.size(0), features.size(1), -1)
                 padding_mask = padding_mask.all(-1)
     
-            if self.post_extract_proj is not None:
+            if self.post_extract_proj_target is not None:
                 features = self.post_extract_proj_target(features)
-    
+            #print("target feature", features.size())
             features = self.dropout_input(features)
             unmasked_features = self.dropout_features(unmasked_features)
     
@@ -740,7 +793,7 @@ class ABCModel(BaseFairseqModel):
                     features = self.project_inp_target(features)
     
             if mask:
-                x, mask_indices = self.apply_mask(features, padding_mask)
+                x, mask_indices = self.apply_mask(features, padding_mask, mask_indices)
                 if mask_indices is not None:
                     y = unmasked_features[mask_indices].view(
                         unmasked_features.size(0), -1, unmasked_features.size(-1)
@@ -753,6 +806,7 @@ class ABCModel(BaseFairseqModel):
                 mask_indices = None
                 
             x = self.encoder_target(x, padding_mask=padding_mask)
+            #print("target encoded", x.size())
     
             if self.quantizer:
                 if self.shared_quantizer:
@@ -772,16 +826,16 @@ class ABCModel(BaseFairseqModel):
     
             else:
                 y = self.project_q(y)
-    
+            #print("target before masking", x.size())
             x = x[mask_indices].view(x.size(0), -1, x.size(-1))
-    
+            #print("target after masking", x.size())
             if self.target_glu:
                 y = self.target_glu_target(y)
-                negs = self.target_glu(negs)
+                negs = self.target_glu_target(negs)
     
             x = self.final_proj_target(x)
             #x = self.compute_preds(x, y, negs)
-    
+            #print("target before prediction", x.size())
             result = {"x": x, "padding_mask": padding_mask, "features_pen": features_pen}
     
             if prob_ppl is not None:
@@ -803,12 +857,27 @@ class ABCModel(BaseFairseqModel):
             self.update_target()
             
         self.step += 1
-        
-        result_0 = self.prediction(source[0], padding_mask, mask, features_only)
-        result_1 = self.prediction(source[1], padding_mask, mask, features_only)
-        result_target_0 = self.target_prediction(source[0], padding_mask, mask, features_only)
-        result_target_1 = self.target_prediction(source[1], padding_mask, mask, features_only)
-        
+        result_0, mask_indices = self.predict(source[0], 
+                                              padding_mask[0] if padding_mask is not None else None, 
+                                              mask, 
+                                              features_only
+                                             )
+        result_1, _ = self.predict(source[1], 
+                                   padding_mask[1] if padding_mask is not None else None, 
+                                   mask, 
+                                   features_only, 
+                                   mask_indices = mask_indices
+                                  )
+        result_target_0 = self.target_predict(source[0], 
+                                              padding_mask[0] if padding_mask is not None else None, 
+                                              mask, 
+                                              mask_indices = mask_indices
+                                             )
+        result_target_1 = self.target_predict(source[1], 
+                                              padding_mask[1] if padding_mask is not None else None, 
+                                              mask, 
+                                              mask_indices = mask_indices
+                                             )
         return result_0, result_1, result_target_0, result_target_1
     
     
@@ -1091,6 +1160,25 @@ class TransformerSentenceEncoderLayer(nn.Module):
 
         return x, attn
     
+    
+class MLPPrediction(nn.Module):
+    def __init__(self, final_dim, byol_hidden_dim):
+        super(MLPPrediction, self).__init__()
+        
+        self.fc1 = nn.Linear(final_dim, byol_hidden_dim)
+        self.bn = nn.BatchNorm1d(byol_hidden_dim)
+        self.relu = nn.ReLU(inplace=True)
+        self.fc2 = nn.Linear(byol_hidden_dim, final_dim)
+        
+    def forward(self, x):
+        x = self.fc1(x)
+        x = x.transpose(1, 2)
+        x = self.bn(x)
+        x = self.relu(x)
+        x = x.transpose(1, 2)
+        x = self.fc2(x)
+        
+        return x
     
 @register_model_architecture("abc", "abc")
 def base_architecture(args):

@@ -14,6 +14,8 @@ import torch.nn.functional as F
 
 from .. import FairseqDataset
 
+import copy
+
 # Audiomentations
 from audiomentations import (
     Compose, 
@@ -192,8 +194,10 @@ class FileAudioDataset(RawAudioDataset):
 
         fname = os.path.join(self.root_dir, self.fnames[index])
         wav, curr_sample_rate = sf.read(fname)
+        #print("wav", wav.shape)
         feats = torch.from_numpy(wav).float()
         feats = self.postprocess(feats, curr_sample_rate)
+        #print("postprocess", feats.size())
         return {"id": index, "source": feats}
     
     
@@ -209,7 +213,7 @@ class AugmentedFileAudioDataset(FileAudioDataset):
         pad=False,
         normalize=False,
     ):
-        super().__init__(
+        super(AugmentedFileAudioDataset, self).__init__(
             manifest_path=manifest_path,
             sample_rate=sample_rate,
             max_sample_size=max_sample_size,
@@ -222,64 +226,13 @@ class AugmentedFileAudioDataset(FileAudioDataset):
         
         self.pre_transform = Compose([
             AddGaussianNoise(min_amplitude=1e-3, max_amplitude=1e-2, p=0.5),
-            ClippingDistortion(min_percentile_threshold=10, max_percentile_threshold=40, p=0.2),
+            #ClippingDistortion(min_percentile_threshold=10, max_percentile_threshold=40, p=0.2),
         ])
-        
-        class RandomReverb:
-            reverberance_min: int = 50
-            reverberance_max: int = 50
-            damping_min: int = 50
-            damping_max: int = 50
-            room_scale_min: int = 0
-            room_scale_max: int = 100
-            p = 0.5
-    
-            def __call__(self):
-                prob = np.random.random_sample()
-                
-                if prob < self.p:
-                    reverberance = np.random.randint(self.reverberance_min, self.reverberance_max + 1)
-                    damping = np.random.randint(self.damping_min, self.damping_max + 1)
-                    room_scale = np.random.randint(self.room_scale_min, self.room_scale_min + 1)
-                else:
-                    reverberance = 0
-                    damping = 0
-                    room_scale = 0
-                return [reverberance, damping, room_scale]
-        
-        class RandomTimeDropout:
-            ms_min = 0
-            ms_max = 200
-            p = 0.5
-            
-            def __call__(self):
-                prob = np.random.random_sample()
-                
-                if prob < self.p:
-                    ms = np.random.randint(self.msmin, self.ms_max + 1)
-                else:
-                    ms = 0
-                
-                return ms
-            
-        class RandomClip:
-            factor_min = 0.0
-            factor_max = 1.0
-            p = 0.2
-            
-            def __call__(self):
-                prob = np.random.random_sample()
-                
-                if prob < self.p:
-                    ratio = np.random.triangular(self.factor_min, self.factor_max, self.factor_max)
-                else:
-                    ratio = 0.0
-                return ratio
         
         random_reverb = RandomReverb()
         random_clip = RandomClip()
         random_time_dropout = RandomTimeDropout()
-        self.post_transform = augment.EffectChain().reverb(random_reverb).channels(1).clip(random_clip).time_dropout(random_time_dropout)
+        self.post_transform = augment.EffectChain().reverb(random_reverb).channels(1).clip(random_clip).time_dropout(200)
         
     def collater(self, samples):
         samples = [
@@ -291,39 +244,51 @@ class AugmentedFileAudioDataset(FileAudioDataset):
             return {}
 
         sources = [s["source"] for s in samples]
-        sizes = [len(s[0]) for s in sources]
-
+        sizes0 = [len(s[0]) for s in sources]
+        sizes1 = [len(s[1]) for s in sources]
+        sizes = sizes0 + sizes1
+        
         if self.pad:
             target_size = min(max(sizes), self.max_sample_size)
         else:
             target_size = min(min(sizes), self.max_sample_size)
 
-        collated_sources0 = sources[0].new_zeros(len(sources), target_size)
-        collated_sources1 = sources[0].new_zeros(len(sources), target_size)
-        padding_mask = (
+        collated_sources0 = sources[0][0].new_zeros(len(sources), target_size)
+        collated_sources1 = sources[0][1].new_zeros(len(sources), target_size)
+        padding_mask0 = (
             torch.BoolTensor(collated_sources0.shape).fill_(False) if self.pad else None
         )
-        for i, (source, size) in enumerate(zip(sources, sizes)):
-            diff = size - target_size
-            if diff == 0:
+        padding_mask1 = (
+            torch.BoolTensor(collated_sources1.shape).fill_(False) if self.pad else None
+        )
+        for i, (source, size0, size1) in enumerate(zip(sources, sizes0, sizes1)):
+            diff0 = size0 - target_size
+            diff1 = size1 - target_size
+            if diff0 == 0:
                 collated_sources0[i] = source[0]
-                collated_sources1[i] = source[1]
-            elif diff < 0:
+            elif diff0 < 0:
                 assert self.pad
                 collated_sources0[i] = torch.cat(
-                    [source0, source0.new_full((-diff,), 0.0)]
+                    [source[0], source[0].new_full((-diff0,), 0.0)]
                 )
-                collated_sources1[i] = torch.cat(
-                    [source1, source1.new_full((-diff,), 0.0)]
-                )
-                padding_mask[i, diff:] = True
+                padding_mask0[i, diff0:] = True
             else:
-                collated_sources0[i] = self.crop_to_max_size(source0, target_size)
-                collated_sources1[i] = self.crop_to_max_size(source0, target_size)
+                collated_sources0[i] = self.crop_to_max_size(source[0], target_size)
+                
+            if diff1 == 0:
+                collated_sources1[i] = source[1]
+            elif diff1 < 0:
+                assert self.pad
+                collated_sources1[i] = torch.cat(
+                    [source[1], source[1].new_full((-diff1,), 0.0)]
+                )
+                padding_mask1[i, diff1:] = True
+            else:
+                collated_sources1[i] = self.crop_to_max_size(source[1], target_size)
 
         input = {"source": [collated_sources0, collated_sources1]}
         if self.pad:
-            input["padding_mask"] = padding_mask
+            input["padding_mask"] = [padding_mask0, padding_mask1]
         return {"id": torch.LongTensor([s["id"] for s in samples]), "net_input": input}
         
     def __getitem__(self, index):
@@ -332,6 +297,7 @@ class AugmentedFileAudioDataset(FileAudioDataset):
         fname = os.path.join(self.root_dir, self.fnames[index])
         wav0, curr_sample_rate = sf.read(fname)
         wav1 = copy.deepcopy(wav0)
+        #print("wav", wav0.shape)
         wav0 = self.pre_transform(samples=wav0, sample_rate=curr_sample_rate)
         wav1 = self.pre_transform(samples=wav1, sample_rate=curr_sample_rate)
         src_info = {'rate': curr_sample_rate}
@@ -340,9 +306,68 @@ class AugmentedFileAudioDataset(FileAudioDataset):
                    }
         feats0 = torch.from_numpy(wav0).float()
         feats1 = torch.from_numpy(wav1).float()
-        feats0 = self.post_transform.apply(feats0, src_info=src_info, tgt_info=tgt_info)
-        feats1 = self.post_transform.apply(feats1, src_info=src_info, tgt_info=tgt_info)
+        #print("preprocess", feats0.size())
+        #print("preprocess", feats1.size())
+        feats0 = self.post_transform.apply(feats0, src_info=src_info, target_info=tgt_info).squeeze()
+        feats1 = self.post_transform.apply(feats1, src_info=src_info, target_info=tgt_info).squeeze()
+        #print("postprocess", feats0.size())
+        #print("postprocess", feats1.size())
         feats0 = self.postprocess(feats0, curr_sample_rate)
         feats1 = self.postprocess(feats1, curr_sample_rate)
-        
+        #print(feats0.size())
         return {"id": index, "source": [feats0, feats1]}
+    
+    
+class RandomReverb:
+    def __init__(self):
+        self.reverberance_min: int = 50
+        self.reverberance_max: int = 50
+        self.damping_min: int = 50
+        self.damping_max: int = 50
+        self.room_scale_min: int = 0
+        self.room_scale_max: int = 100
+        self.p = 0.5
+
+    def __call__(self):
+        prob = np.random.random_sample()
+        
+        if prob < self.p:
+            reverberance = np.random.randint(self.reverberance_min, self.reverberance_max + 1)
+            damping = np.random.randint(self.damping_min, self.damping_max + 1)
+            room_scale = np.random.randint(self.room_scale_min, self.room_scale_min + 1)
+        else:
+            reverberance = 0
+            damping = 0
+            room_scale = 0
+        return [reverberance, damping, room_scale]
+
+class RandomTimeDropout:
+    def __init__(self):
+        self.ms_min = 0
+        self.ms_max = 200
+        self.p = 0.5
+    
+    def __call__(self):
+        prob = np.random.random_sample()
+        
+        if prob < self.p:
+            ms = np.random.randint(self.ms_min, self.ms_max + 1)
+        else:
+            ms = 0
+        
+        return ms
+    
+class RandomClip:
+    def __init__(self):
+        self.factor_min = 0.0
+        self.factor_max = 0.2
+        self.p = 0.2
+    
+    def __call__(self):
+        prob = np.random.random_sample()
+        
+        if prob < self.p:
+            ratio = np.random.triangular(self.factor_min, self.factor_max, self.factor_max)
+        else:
+            ratio = 0.0
+        return ratio
