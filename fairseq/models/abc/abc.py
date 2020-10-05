@@ -387,13 +387,15 @@ class ABCModel(BaseFairseqModel):
             self.post_extract_proj = (
                 nn.Linear(self.embed, args.encoder_embed_dim)
             )
-            self.online_params += list(self.post_extract_proj.parameters())
-        
-        if self.embed != args.encoder_embed_dim and not args.quantize_input:
             self.post_extract_proj_target = (
                 nn.Linear(self.embed, args.encoder_embed_dim)
             )
+            self.online_params += list(self.post_extract_proj.parameters())
             self.target_params += list(self.post_extract_proj_target.parameters())
+        else:
+            self.post_extract_proj = None
+            self.post_extract_proj_target = None
+            
 
         self.mask_prob = args.mask_prob
         self.mask_selection = args.mask_selection
@@ -435,8 +437,6 @@ class ABCModel(BaseFairseqModel):
                 vq_dim=vq_dim,
                 time_first=True,
             )
-            
-            
             
             if not args.shared_quantizer:
                 self.quantizer_target = GumbelVectorQuantizer(
@@ -499,8 +499,8 @@ class ABCModel(BaseFairseqModel):
             self.mask_emb_target = nn.Parameter(
                 torch.FloatTensor(args.encoder_embed_dim).uniform_()
             )
-            self.online_params += list(self.mask_emb.parameters())
-            self.target_params += list(self.mask_emb_target.parameters())
+            #self.online_params += list(self.mask_emb)
+            #self.target_params += list(self.mask_emb_target)
 
         if args.mlp_encoder:
             self.encoder = nn.Sequential(
@@ -643,7 +643,7 @@ class ABCModel(BaseFairseqModel):
         return self.quantizer.forward_idx(x)
 
     def extract_features(self, source, padding_mask, mask=False):
-        res = self.forward(source[0], padding_mask[0], mask=mask, features_only=True)
+        res = self.predict(source, padding_mask, mask=mask, features_only=True)
         return res["x"], res["padding_mask"]
     
     def predict(self, source, padding_mask=None, mask=True, features_only=False, mask_indices=None):
@@ -880,6 +880,23 @@ class ABCModel(BaseFairseqModel):
                                              )
         return result_0, result_1, result_target_0, result_target_1
     
+    def remove_pretraining_modules(self):
+        self.quantizer = None
+        self.project_q = None
+        self.target_glu = None
+        self.final_proj = None
+        
+        self.feature_extractor_target = None
+        self.post_extract_proj_target = None
+        self.quantizer_target = None
+        self.input_quantizer_target = None
+        if not self.args.shared_emb:
+            self.mask_emb_target = None
+        self.encoder_target = None
+        self.target_glu_target = None
+        self.final_proj_target = None
+        self.prediction = None
+        
     
 class ConvFeatureExtractionModel(nn.Module):
     def __init__(

@@ -320,10 +320,10 @@ class AugmentedFileAudioDataset(FileAudioDataset):
     
 class RandomReverb:
     def __init__(self):
-        self.reverberance_min: int = 50
-        self.reverberance_max: int = 50
-        self.damping_min: int = 50
-        self.damping_max: int = 50
+        self.reverberance_min: int = 0
+        self.reverberance_max: int = 100
+        self.damping_min: int = 0
+        self.damping_max: int = 100
         self.room_scale_min: int = 0
         self.room_scale_max: int = 100
         self.p = 0.5
@@ -361,7 +361,7 @@ class RandomClip:
     def __init__(self):
         self.factor_min = 0.0
         self.factor_max = 0.2
-        self.p = 0.2
+        self.p = 0.5
     
     def __call__(self):
         prob = np.random.random_sample()

@@ -49,8 +49,11 @@ class ABCCriterion(FairseqCriterion):
         target_proj_0_norm = F.normalize(target_proj_0, dim=-1)
         target_proj_1_norm = F.normalize(target_proj_1, dim=-1)
         
-        loss_ab = F.mse_loss(online_pred_0_norm, target_proj_0_norm, reduction="sum" if reduce else "none",)
-        loss_ba = F.mse_loss(online_pred_1_norm, target_proj_1_norm, reduction="sum" if reduce else "none",)
+        
+        #loss_ab = 2 - 2 * (online_pred_0_norm * target_proj_1_norm).sum(dim=-1)
+        #loss_ba = 2 - 2 * (online_pred_1_norm * target_proj_0_norm).sum(dim=-1)
+        loss_ab = F.mse_loss(online_pred_0_norm, target_proj_1_norm, reduction="sum" if reduce else "none",)
+        loss_ba = F.mse_loss(online_pred_1_norm, target_proj_0_norm, reduction="sum" if reduce else "none",)
         
         loss = loss_ab + loss_ba
         
