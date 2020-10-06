@@ -59,7 +59,7 @@ class ABCCriterion(FairseqCriterion):
         
         losses = []
         
-        sample_size = target_proj_0_norm.numel()
+        sample_size = target_proj_0_norm.numel() // target_proj_0_norm.size(0)
         losses.append(loss.detach().clone())
         
         if self.loss_weights is not None:

@@ -326,6 +326,12 @@ class ABCModel(BaseFairseqModel):
             action="store_true",
             help="use MLP as encoder network"
         )
+        
+        parser.add_argument(
+            "--separate-mask-indices",
+            action="store_true",
+            help="use two separate mask indices for Transformers"
+        )
 
         parser.add_argument(
             "--conv-pos",
@@ -355,6 +361,7 @@ class ABCModel(BaseFairseqModel):
         parser.add_argument(
             "--conv-bias", action="store_true", help="include bias in conv encoder"
         )
+        
         
     def __init__(self, args):
         super().__init__()
@@ -544,20 +551,8 @@ class ABCModel(BaseFairseqModel):
         ### TODO: Transformer prediction network?
         if args.mlp_prediction:
             self.prediction = MLPPrediction(final_dim, args.byol_hidden_dim)
-            #self.prediction = nn.Sequential(
-            #    nn.Linear(final_dim, args.byol_hidden_dim),
-            #    nn.BatchNorm1d(args.byol_hidden_dim),
-            #    nn.ReLU(inplace=True),
-            #    nn.Linear(args.byol_hidden_dim, final_dim)
-            #)
         else:
-            self.prediction = MLPPrediction(final_dim, args.byol_hidden_dim)
-            #self.prediction = nn.Sequential(
-            #    nn.Linear(final_dim, args.byol_hidden_dim),
-            #    nn.BatchNorm1d(args.byol_hidden_dim),
-            #    nn.ReLU(inplace=True),
-            #    nn.Linear(args.byol_hidden_dim, final_dim)
-            #)
+            self.prediction = TransformerEncoder(args, args.final_dim)
             
         for param in self.target_params:
             param.requires_grad = False
@@ -730,7 +725,10 @@ class ABCModel(BaseFairseqModel):
         #x = self.compute_preds(x, y, negs)
 
         #print("online before prediction", x.size())
-        x = self.prediction(x)
+        if self.args.mlp_prediction:
+            x = self.prediction(x)
+        else:
+            x = self.prediction(x, padding_mask=padding_mask)
         
         result = {"x": x, "padding_mask": padding_mask, "features_pen": features_pen}
 
@@ -857,26 +855,37 @@ class ABCModel(BaseFairseqModel):
             self.update_target()
             
         self.step += 1
-        result_0, mask_indices = self.predict(source[0], 
-                                              padding_mask[0] if padding_mask is not None else None, 
-                                              mask, 
-                                              features_only
-                                             )
-        result_1, _ = self.predict(source[1], 
-                                   padding_mask[1] if padding_mask is not None else None, 
-                                   mask, 
-                                   features_only, 
-                                   mask_indices = mask_indices
-                                  )
+        
+        result_0, mask_indices0 = self.predict(source[0], 
+                                                  padding_mask[0] if padding_mask is not None else None, 
+                                                  mask, 
+                                                  features_only
+                                                 )
+        
+        if self.args.separate_mask_indices:
+            result_1, mask_indices1 = self.predict(source[1], 
+                                       padding_mask[1] if padding_mask is not None else None, 
+                                       mask, 
+                                       features_only, 
+                                      )
+        else:
+            result_1, _ = self.predict(source[1], 
+                                       padding_mask[1] if padding_mask is not None else None, 
+                                       mask, 
+                                       features_only, 
+                                       mask_indices = mask_indices0
+                                      )
+            mask_indices1 = mask_indices0
+            
         result_target_0 = self.target_predict(source[0], 
                                               padding_mask[0] if padding_mask is not None else None, 
                                               mask, 
-                                              mask_indices = mask_indices
+                                              mask_indices = mask_indices1
                                              )
         result_target_1 = self.target_predict(source[1], 
                                               padding_mask[1] if padding_mask is not None else None, 
                                               mask, 
-                                              mask_indices = mask_indices
+                                              mask_indices = mask_indices0
                                              )
         return result_0, result_1, result_target_0, result_target_1
     
@@ -1263,10 +1272,11 @@ def base_architecture(args):
     args.prediction_dim = getattr(args, "prediction_dim", 256)
     args.byol_hidden_dim = getattr(args, "byol_hidden_dim", 4096)
     
-    args.shared_quantizer = getattr(args, "shared_quantizer", True)
+    args.shared_quantizer = getattr(args, "shared_quantizer", False)
     args.shared_emb = getattr(args, "shared_emb", True)
-    args.mlp_prediction = getattr(args, "mlp_prediction", True)
+    args.mlp_prediction = getattr(args, "mlp_prediction", False)
     args.mlp_encoder = getattr(args, "mlp_encoder", False)
+    args.separate_mask_indices = getattr(args, "separate_mask_indices", False)
     
     args.conv_pos = getattr(args, "conv_pos", 128)
     args.conv_pos_groups = getattr(args, "conv_pos_groups", 16)
