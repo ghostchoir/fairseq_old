@@ -1273,7 +1273,7 @@ def base_architecture(args):
     args.byol_hidden_dim = getattr(args, "byol_hidden_dim", 4096)
     
     args.shared_quantizer = getattr(args, "shared_quantizer", False)
-    args.shared_emb = getattr(args, "shared_emb", True)
+    args.shared_emb = getattr(args, "shared_emb", False)
     args.mlp_prediction = getattr(args, "mlp_prediction", False)
     args.mlp_encoder = getattr(args, "mlp_encoder", False)
     args.separate_mask_indices = getattr(args, "separate_mask_indices", False)
