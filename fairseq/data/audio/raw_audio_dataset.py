@@ -225,14 +225,15 @@ class AugmentedFileAudioDataset(FileAudioDataset):
         )
         
         self.pre_transform = Compose([
-            AddGaussianNoise(min_amplitude=1e-3, max_amplitude=1e-2, p=0.5),
+            AddGaussianNoise(min_amplitude=1e-3, max_amplitude=5e-2, p=0.8),
+            PitchShift(min_semitones=-4, max_semitones=4, p=0.8),
             #ClippingDistortion(min_percentile_threshold=10, max_percentile_threshold=40, p=0.2),
         ])
         
         random_reverb = RandomReverb()
         random_clip = RandomClip()
         random_time_dropout = RandomTimeDropout()
-        self.post_transform = augment.EffectChain().reverb(random_reverb).channels(1).clip(random_clip).time_dropout(200)
+        self.post_transform = augment.EffectChain().reverb(random_reverb).channels(1).clip(random_clip)#.time_dropout(200)
         
     def collater(self, samples):
         samples = [
@@ -326,7 +327,7 @@ class RandomReverb:
         self.damping_max: int = 100
         self.room_scale_min: int = 0
         self.room_scale_max: int = 100
-        self.p = 0.5
+        self.p = 0.8
 
     def __call__(self):
         prob = np.random.random_sample()
@@ -361,7 +362,7 @@ class RandomClip:
     def __init__(self):
         self.factor_min = 0.0
         self.factor_max = 0.2
-        self.p = 0.5
+        self.p = 0.25
     
     def __call__(self):
         prob = np.random.random_sample()
