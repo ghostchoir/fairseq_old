@@ -37,11 +37,11 @@ class ABCCriterion(FairseqCriterion):
         # B x T x C
         result_0, result_1, result_target_0, result_target_1 = model(**sample['net_input'])
         
-        online_pred_0 = result_0["x"].view(-1, result_0["x"].size()[-1])
-        online_pred_1 = result_1["x"].view(-1, result_1["x"].size()[-1])
+        online_pred_0 = result_0["x"].reshape(-1, result_0["x"].size()[-1])
+        online_pred_1 = result_1["x"].reshape(-1, result_1["x"].size()[-1])
         
-        target_proj_0 = result_target_0["x"].detach().view(-1, result_target_0["x"].size()[-1])
-        target_proj_1 = result_target_1["x"].detach().view(-1, result_target_1["x"].size()[-1])
+        target_proj_0 = result_target_0["x"].detach().reshape(-1, result_target_0["x"].size()[-1])
+        target_proj_1 = result_target_1["x"].detach().reshape(-1, result_target_1["x"].size()[-1])
         
         online_pred_0_norm = F.normalize(online_pred_0, dim=-1)
         online_pred_1_norm = F.normalize(online_pred_1, dim=-1)
