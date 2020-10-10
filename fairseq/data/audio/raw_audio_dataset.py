@@ -26,7 +26,9 @@ from audiomentations import (
     Gain, 
     PitchShift, 
     Shift, 
-    TimeStretch
+    TimeStretch,
+    FrequencyMask,
+    TimeMask
 )
 
 # WavAugment
@@ -227,6 +229,8 @@ class AugmentedFileAudioDataset(FileAudioDataset):
         self.pre_transform = Compose([
             AddGaussianNoise(min_amplitude=1e-3, max_amplitude=5e-2, p=0.8),
             PitchShift(min_semitones=-4, max_semitones=4, p=0.8),
+            FrequencyMask(min_frequency_band=0.0, max_frequency_band=0.5, p=1.0),
+            TimeMask(min_band_part=0.0, max_band_part=0.5, p=1.0)
             #ClippingDistortion(min_percentile_threshold=10, max_percentile_threshold=40, p=0.2),
         ])
         
