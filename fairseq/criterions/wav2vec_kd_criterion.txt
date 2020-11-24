@@ -40,23 +40,15 @@ class Wav2VecKDCriterion(FairseqCriterion):
         3) logging outputs to display while training
         """
         
-        #print(sample['net_input'].keys())
-        net_output = model(**sample['net_input'])
+        x, y = model(**sample['net_input'])
         
-        s = model.get_normalized_probs(net_output, log_probs=True).contiguous()
-        #print(s.size())
+        s = model.get_normalized_probs(x, log_probs=True).contiguous()
         s = s.reshape(-1, s.size(2))
-        #print(s.size())
         
         with torch.no_grad():
-            t = sample['target'].cuda()
-            t = utils.softmax(t, dim=-1)
+            t = model.get_normalized_probs(y, log_probs=False).contiguous()
             t = t.reshape(-1, t.size(2))
-        
-        target_size = min(len(s), len(t))
-        s = s[:target_size]
-        t = t[:target_size]
-        #print(t.size())
+
         losses = []
 
         loss = F.kl_div(s, t, reduction="sum" if reduce else "none",)

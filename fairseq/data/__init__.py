@@ -11,7 +11,7 @@ from .base_wrapper_dataset import BaseWrapperDataset
 
 from .add_target_dataset import AddTargetDataset
 from .append_token_dataset import AppendTokenDataset
-from .audio.raw_audio_dataset import FileAudioDataset, AugmentedFileAudioDataset
+from .audio.raw_audio_dataset import FileAudioDataset, AugmentedFileAudioDataset, KDAudioDataset
 from .backtranslation_dataset import BacktranslationDataset
 from .bucket_pad_length_dataset import BucketPadLengthDataset
 from .colorize_dataset import ColorizeDataset
@@ -100,6 +100,7 @@ __all__ = [
     'ReplaceDataset',
     'RollDataset',
     'FileAudioDataset',
+    'KDAudioDataset',
     'RawLabelDataset',
     'ResamplingDataset',
     'RightPadDataset',

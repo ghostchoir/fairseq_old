@@ -203,6 +203,146 @@ class FileAudioDataset(RawAudioDataset):
         return {"id": index, "source": feats}
     
     
+class KDAudioDataset(RawAudioDataset):
+    def __init__(
+        self,
+        manifest_path,
+        sample_rate,
+        max_sample_size=None,
+        min_sample_size=None,
+        shuffle=True,
+        min_length=0,
+        pad=False,
+        normalize=False,
+        feat_extension='flac',
+    ):
+        super().__init__(
+            sample_rate=sample_rate,
+            max_sample_size=max_sample_size,
+            min_sample_size=min_sample_size,
+            shuffle=shuffle,
+            min_length=min_length,
+            pad=pad,
+            normalize=normalize,
+        )
+
+        self.fnames = []
+        self.tnames = []
+
+        skipped = 0
+        with open(manifest_path, "r") as f:
+            self.root_dir = f.readline().strip()
+            for line in f:
+                items = line.strip().split("\t")
+                assert len(items) == 2, line
+                sz = int(items[1])
+                if min_length is not None and sz < min_length:
+                    skipped += 1
+                    continue
+                self.fnames.append(items[0])
+                self.tnames.append(items[0].replace('.'+feat_extension, '.ctcoutput'))
+                self.sizes.append(sz)
+        logger.info(f"loaded {len(self.fnames)}, skipped {skipped} samples")
+        
+    def crop_to_max_size(self, wav, target_size):
+        size = len(wav)
+        diff = size - target_size
+        if diff <= 0:
+            return wav
+
+        start = np.random.randint(0, diff + 1)
+        end = size - diff + start
+        
+        #if end-start != target_size:
+        #    return wav[start:end-1]
+        return wav[start:end]
+        
+    def collater(self, samples):
+        samples = [
+            s
+            for s in samples
+            if s["source"] is not None
+        ]
+        if len(samples) == 0:
+            return {}
+
+        sources = [s["source"] for s in samples]
+        targets = [s["target"] for s in samples]
+        sizes = [len(s) for s in sources]
+        t_sizes = [s["target"].size(0) for s in samples]
+
+        if self.pad:
+            target_size = min(max(sizes), self.max_sample_size)
+        else:
+            target_size = min(min(sizes), self.max_sample_size)
+            
+        target_t_size = max(t_sizes)
+        #print(target_t_size)
+        target_dim = targets[0].size(-1)
+
+        collated_sources = sources[0].new_zeros(len(sources), target_size)
+        collated_targets = targets[0].new_zeros(len(targets), target_t_size, target_dim)
+        padding_mask = (
+            torch.BoolTensor(collated_sources.shape).fill_(False) if self.pad else None
+        )
+        for i, (source, target, size, t_size) in enumerate(zip(sources, targets, sizes, t_sizes)):
+            diff = size - target_size
+            t_diff = t_size - target_t_size
+            if diff == 0:
+                collated_sources[i] = source
+            elif diff < 0:
+                assert self.pad
+                collated_sources[i] = torch.cat(
+                    [source, source.new_full((-diff,), 0.0)]
+                )
+                padding_mask[i, diff:] = True
+            else:
+                collated_sources[i] = self.crop_to_max_size(source, target_size)
+                
+            #print(t_diff, t_size, target_t_size)
+                
+            try:
+                if t_diff == 0:
+                    collated_targets[i] = target
+                elif t_diff < 0:
+                    assert self.pad
+                    
+                    #print(target.size())
+                    #print(target.new_full((-t_diff, target_dim), 0.0).size())
+                    #print(torch.cat(
+                    #    [target, target.new_full((-diff, target_dim), 0.0)]
+                    #).size())
+                    collated_targets[i] = torch.cat(
+                        [target, target.new_full((-t_diff, target_dim), 0.0)]
+                    )
+                else:
+                    collated_targets[i] = self.crop_to_max_size(target, target_t_size)[:target_t_size]
+                    
+            except:
+                print(target_t_size, len(target))
+                
+
+        input = {"source": collated_sources}
+        if self.pad:
+            input["padding_mask"] = padding_mask
+        else:
+            input["padding_mask"] = None
+        return {"id": torch.LongTensor([s["id"] for s in samples]), "net_input": input, "target": collated_targets}
+        
+    def __getitem__(self, index):
+        import soundfile as sf
+
+        fname = os.path.join(self.root_dir, self.fnames[index])
+        wav, curr_sample_rate = sf.read(fname)
+        #print("wav", wav.shape)
+        feats = torch.from_numpy(wav).float()
+        feats = self.postprocess(feats, curr_sample_rate)
+        tname = os.path.join(self.root_dir, self.tnames[index])
+        targets = torch.load(tname).squeeze()
+        #print("postprocess", feats.size())
+        return {"id": index, "source": feats, "target": targets}
+    
+    
 class AugmentedFileAudioDataset(FileAudioDataset):
     def __init__(
         self,

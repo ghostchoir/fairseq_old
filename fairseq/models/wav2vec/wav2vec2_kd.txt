@@ -14,8 +14,6 @@ import torch.nn.functional as F
 
 from fairseq import checkpoint_utils, tasks, utils
 
-from fairseq.models.wav2vec.wav2vec2 import Wav2Vec2Model
-
 from fairseq.models import (
     FairseqEncoder,
     FairseqIncrementalDecoder,
@@ -24,6 +22,8 @@ from fairseq.models import (
     register_model,
     register_model_architecture,
 )
+
+from fairseq.models.wav2vec.wav2vec2 import Wav2Vec2Model
 from fairseq.modules import LayerNorm, PositionalEmbedding, TransformerDecoderLayer
 
 
@@ -203,6 +203,7 @@ def add_w2v_args(parser):
 
 
 def add_common_args(parser):
+    parser.add_argument("--w2v-path", help="path to wav2vec 2.0 model")
     parser.add_argument(
         "--no-pretrained-weights",
         action="store_true",
@@ -327,11 +328,12 @@ class Wav2VecKD(BaseFairseqModel):
     def add_args(parser):
         """Add model-specific arguments to the parser."""
         add_common_args(parser)
-        add_w2v_args(parser)
+        #add_w2v_args(parser)
 
-    def __init__(self, w2v_encoder, args):
+    def __init__(self, teacher, student, args):
         super().__init__()
-        self.w2v_encoder = w2v_encoder
+        self.teacher = teacher
+        self.student = student
         self.args = args
 
     def upgrade_state_dict_named(self, state_dict, name):
@@ -342,8 +344,24 @@ class Wav2VecKD(BaseFairseqModel):
     def build_model(cls, args, task):
         """Build a new model instance."""
         base_architecture(args)
-        w2v_encoder = Wav2VecEncoder(args, task.target_dictionary)
-        return cls(w2v_encoder, args)
+        w2v_path = args.w2v_path
+        args.w2v_path = None
+        cp = torch.load(w2v_path)
+        args.w2v_args = cp["args"].w2v_args
+        
+        sd = cp["model"]
+        sd_new = {}
+        
+        for key, value in sd.items():
+            sd_new[key.replace('w2v_encoder.', '')] = value
+        
+        teacher = Wav2VecEncoder(args, task.target_dictionary)
+        teacher.load_state_dict(sd_new, strict=True)
+        s_args = copy.deepcopy(args)
+        w2v_base_architecture(s_args)
+        args.w2v_args = s_args
+        student = Wav2VecEncoder(args, task.target_dictionary)
+        return cls(teacher, student, args)
 
     def get_normalized_probs(self, net_output, log_probs):
         """Get normalized probabilities (or log probs) from a net's output."""
@@ -353,26 +371,68 @@ class Wav2VecKD(BaseFairseqModel):
             return utils.log_softmax(logits.float(), dim=-1)
         else:
             return utils.softmax(logits.float(), dim=-1)
-
+    
     def forward(self, **kwargs):
-        x = self.w2v_encoder(**kwargs)
-        return x
+        
+        x = self.student(**kwargs)
+        with torch.no_grad():
+            y = self.teacher(**kwargs)
+            
+        #print(x["encoder_out"].size(), y["encoder_out"].size())
+        return x, y
 
     # def max_positions(self):
     #     return None
-
+    
 
 class Wav2VecEncoder(FairseqEncoder):
     def __init__(self, args, tgt_dict=None):
         self.apply_mask = args.apply_mask
+
+        arg_overrides = {
+            "dropout": args.dropout,
+            "activation_dropout": args.activation_dropout,
+            "dropout_input": args.dropout_input,
+            "attention_dropout": args.attention_dropout,
+            "mask_length": args.mask_length,
+            "mask_prob": args.mask_prob,
+            "mask_selection": args.mask_selection,
+            "mask_other": args.mask_other,
+            "no_mask_overlap": args.no_mask_overlap,
+            "mask_channel_length": args.mask_channel_length,
+            "mask_channel_prob": args.mask_channel_prob,
+            "mask_channel_selection": args.mask_channel_selection,
+            "mask_channel_other": args.mask_channel_other,
+            "no_mask_channel_overlap": args.no_mask_channel_overlap,
+            "encoder_layerdrop": args.layerdrop,
+            "feature_grad_mult": args.feature_grad_mult,
+        }
         
-        model = Wav2Vec2Model.build_model(args)
+        if getattr(args, "w2v_args", None) is None:
+            state = checkpoint_utils.load_checkpoint_to_cpu(
+                args.w2v_path, arg_overrides
+            )
+            w2v_args = state["args"]
+        else:
+            state = None
+            w2v_args = args.w2v_args
+            w2v_args.arch = "wav2vec2"
+
+        assert args.normalize == w2v_args.normalize, 'Fine-tuning works best when data normalization is the same'
+        
+        w2v_args.data = args.data
+        task = tasks.setup_task(w2v_args)
+        
+        model = task.build_model(w2v_args)
+
+        if state is not None and not args.no_pretrained_weights:
+            model.load_state_dict(state["model"], strict=True)
 
         model.remove_pretraining_modules()
 
-        super().__init__(None)
+        super().__init__(task.source_dictionary)
 
-        d = args.encoder_embed_dim
+        d = w2v_args.encoder_embed_dim
 
         self.w2v_model = model
 
@@ -453,33 +513,7 @@ def Linear(in_features, out_features, bias=True):
         nn.init.constant_(m.bias, 0.0)
     return m
 
-
-@register_model_architecture("wav2vec_kd", "wav2vec_kd")
-def base_architecture(args):
-    args.no_pretrained_weights = getattr(args, "no_pretrained_weights", False)
-    #args.dropout_input = getattr(args, "dropout_input", 0)
-    args.final_dropout = getattr(args, "final_dropout", 0)
-    args.apply_mask = getattr(args, "apply_mask", False)
-    #args.dropout = getattr(args, "dropout", 0)
-    #args.attention_dropout = getattr(args, "attention_dropout", 0)
-    #args.activation_dropout = getattr(args, "activation_dropout", 0)
-
-    #args.mask_length = getattr(args, "mask_length", 10)
-    #args.mask_prob = getattr(args, "mask_prob", 0.5)
-    #args.mask_selection = getattr(args, "mask_selection", "static")
-    #args.mask_other = getattr(args, "mask_other", 0)
-    #args.no_mask_overlap = getattr(args, "no_mask_overlap", False)
-    #args.mask_channel_length = getattr(args, "mask_channel_length", 10)
-    #args.mask_channel_prob = getattr(args, "mask_channel_prob", 0.5)
-    #args.mask_channel_selection = getattr(args, "mask_channel_selection", "static")
-    #args.mask_channel_other = getattr(args, "mask_channel_other", 0)
-    #args.no_mask_channel_overlap = getattr(args, "no_mask_channel_overlap", False)
-
-    args.freeze_finetune_updates = getattr(args, "freeze_finetune_updates", 0)
-    #args.feature_grad_mult = getattr(args, "feature_grad_mult", 0)
-    #args.layerdrop = getattr(args, "layerdrop", 0)
-    
-    
+def w2v_base_architecture(args):
     args.extractor_mode = getattr(args, "extractor_mode", "default")
 
     args.encoder_layers = getattr(args, "encoder_layers", 6)
@@ -548,22 +582,28 @@ def base_architecture(args):
     
     args.infonce = getattr(args, "infonce", True)
 
+    
+@register_model_architecture("wav2vec_kd", "wav2vec_kd")
+def base_architecture(args):
+    args.no_pretrained_weights = getattr(args, "no_pretrained_weights", False)
+    args.dropout_input = getattr(args, "dropout_input", 0)
+    args.final_dropout = getattr(args, "final_dropout", 0)
+    args.apply_mask = getattr(args, "apply_mask", False)
+    args.dropout = getattr(args, "dropout", 0)
+    args.attention_dropout = getattr(args, "attention_dropout", 0)
+    args.activation_dropout = getattr(args, "activation_dropout", 0)
 
-#@register_model_architecture("wav2vec_seq2seq", "wav2vec_seq2seq")
-#def seq2seq_architecture(args):
-#    args.decoder_embed_dim = getattr(args, "decoder_embed_dim", 1024)
-#    args.decoder_ffn_embed_dim = getattr(args, "decoder_ffn_embed_dim", 4096)
-#    args.decoder_layers = getattr(args, "decoder_layers", 10)
-#    args.decoder_layerdrop = getattr(args, "decoder_layerdrop", 0)
-#    args.decoder_attention_heads = getattr(args, "decoder_attention_heads", 16)
-#    args.decoder_learned_pos = getattr(args, "decoder_learned_pos", False)
-#    args.decoder_normalize_before = getattr(args, "decoder_normalize_before", False)
-#    args.no_token_positional_embeddings = getattr(
-#        args, "no_token_positional_embeddings", False
-#    )
-#    args.decoder_dropout = getattr(args, "decoder_dropout", 0)
-#    args.decoder_attention_dropout = getattr(args, "decoder_attention_dropout", 0)
-#    args.decoder_activation_dropout = getattr(args, "decoder_activation_dropout", 0)
-#    args.share_decoder_input_output_embed = getattr(args, "share_decoder_input_output_embed", False)
-#
-#    base_architecture(args)
+    args.mask_length = getattr(args, "mask_length", 10)
+    args.mask_prob = getattr(args, "mask_prob", 0.5)
+    args.mask_selection = getattr(args, "mask_selection", "static")
+    args.mask_other = getattr(args, "mask_other", 0)
+    args.no_mask_overlap = getattr(args, "no_mask_overlap", False)
+    args.mask_channel_length = getattr(args, "mask_channel_length", 10)
+    args.mask_channel_prob = getattr(args, "mask_channel_prob", 0.5)
+    args.mask_channel_selection = getattr(args, "mask_channel_selection", "static")
+    args.mask_channel_other = getattr(args, "mask_channel_other", 0)
+    args.no_mask_channel_overlap = getattr(args, "no_mask_channel_overlap", False)
+
+    args.freeze_finetune_updates = getattr(args, "freeze_finetune_updates", 0)
+    args.feature_grad_mult = getattr(args, "feature_grad_mult", 0)
+    args.layerdrop = getattr(args, "layerdrop", 0.0)
