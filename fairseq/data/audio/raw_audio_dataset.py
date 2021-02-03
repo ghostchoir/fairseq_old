@@ -367,10 +367,10 @@ class AugmentedFileAudioDataset(FileAudioDataset):
         )
         
         self.pre_transform = Compose([
-            AddGaussianNoise(min_amplitude=1e-3, max_amplitude=5e-2, p=0.8),
-            PitchShift(min_semitones=-4, max_semitones=4, p=0.8),
-            FrequencyMask(min_frequency_band=0.0, max_frequency_band=0.5, p=1.0),
-            TimeMask(min_band_part=0.0, max_band_part=0.5, p=1.0)
+            #AddGaussianNoise(min_amplitude=1e-3, max_amplitude=5e-2, p=0.8),
+            #PitchShift(min_semitones=-4, max_semitones=4, p=0.8),
+            FrequencyMask(min_frequency_band=0.0, max_frequency_band=0.05, p=0.5),
+            TimeMask(min_band_part=0.0, max_band_part=0.05, p=0.5)
             #ClippingDistortion(min_percentile_threshold=10, max_percentile_threshold=40, p=0.2),
         ])
         
@@ -453,8 +453,8 @@ class AugmentedFileAudioDataset(FileAudioDataset):
         feats1 = torch.from_numpy(wav1).float()
         #print("preprocess", feats0.size())
         #print("preprocess", feats1.size())
-        feats0 = self.post_transform.apply(feats0, src_info=src_info, target_info=tgt_info).squeeze()
-        feats1 = self.post_transform.apply(feats1, src_info=src_info, target_info=tgt_info).squeeze()
+        #feats0 = self.post_transform.apply(feats0, src_info=src_info, target_info=tgt_info).squeeze()
+        #feats1 = self.post_transform.apply(feats1, src_info=src_info, target_info=tgt_info).squeeze()
         #print("postprocess", feats0.size())
         #print("postprocess", feats1.size())
         feats0 = self.postprocess(feats0, curr_sample_rate)
