@@ -381,10 +381,10 @@ class Wav2VecEncoder(FairseqEncoder):
 
         with torch.no_grad() if not ft else contextlib.ExitStack():
             if layer_results:
+                x, padding_mask, layer_x = self.w2v_model.extract_features(**w2v_args)
+            else:
                 x, padding_mask = self.w2v_model.extract_features(**w2v_args)
                 layer_x = None
-            else:
-                x, padding_mask, layer_x = self.w2v_model.extract_features(**w2v_args)
 
             if tbc:
                 # B x T x C -> T x B x C
