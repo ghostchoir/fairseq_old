@@ -526,7 +526,7 @@ class Wav2Vec2Model(BaseFairseqModel):
 
         return logits
 
-    def forward(self, source, padding_mask=None, mask=True, features_only=False):
+    def forward(self, source, padding_mask=None, mask=True, features_only=False, layer_results=False):
 
         if self.feature_grad_mult > 0:
             features = self.feature_extractor(source)
@@ -582,10 +582,17 @@ class Wav2Vec2Model(BaseFairseqModel):
             y = unmasked_features
             mask_indices = None
 
-        x = self.encoder(x, padding_mask=padding_mask)
+        x = self.encoder(x, padding_mask=padding_mask, layer_results=layer_results)
+
+        if layer_results:
+            x = x[0]
+            layer_x = x[1]
 
         if features_only:
-            return {"x": x, "padding_mask": padding_mask}
+            if layer_results:
+                return {"x": x, "layer_results": layer_x, "padding_mask": padding_mask}
+            else:
+                return {"x": x, "padding_mask": padding_mask}
 
         if self.quantizer:
             q = self.quantizer(y, produce_targets=False)
@@ -649,9 +656,12 @@ class Wav2Vec2Model(BaseFairseqModel):
         x = self.layer_norm(x)
         return self.quantizer.forward_idx(x)
 
-    def extract_features(self, source, padding_mask, mask=False):
-        res = self.forward(source, padding_mask, mask=mask, features_only=True)
-        return res["x"], res["padding_mask"]
+    def extract_features(self, source, padding_mask, mask=False, layer_results=False):
+        res = self.forward(source, padding_mask, mask=mask, features_only=True, layer_results=layer_results)
+        if layer_results:
+            return res["x"], res["padding_mask"], res["layer_results"]
+        else:
+            return res["x"], res["padding_mask"]
 
     def get_logits(self, net_output):
         logits = net_output["x"]
@@ -817,7 +827,7 @@ class TransformerEncoder(nn.Module):
 
         return x
 
-    def extract_features(self, x, padding_mask=None):
+    def extract_features(self, x, padding_mask=None, layer_results=False):
 
         if padding_mask is not None:
             x[padding_mask] = 0
@@ -844,7 +854,10 @@ class TransformerEncoder(nn.Module):
         # T x B x C -> B x T x C
         x = x.transpose(0, 1)
 
-        return x
+        if layer_results:
+            return x, layer_results
+        else:
+            return x
 
     def max_positions(self):
         """Maximum output length supported by the encoder."""

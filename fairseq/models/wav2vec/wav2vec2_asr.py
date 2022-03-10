@@ -368,18 +368,23 @@ class Wav2VecEncoder(FairseqEncoder):
         super().set_num_updates(num_updates)
         self.num_updates = num_updates
 
-    def forward(self, source, padding_mask, tbc=True, **kwargs):
+    def forward(self, source, padding_mask, tbc=True, layer_results=False, **kwargs):
 
         w2v_args = {
             "source": source,
             "padding_mask": padding_mask,
             "mask": self.apply_mask and self.training,
+            "layer_results": layer_results
         }
 
         ft = self.freeze_finetune_updates <= self.num_updates
 
         with torch.no_grad() if not ft else contextlib.ExitStack():
-            x, padding_mask = self.w2v_model.extract_features(**w2v_args)
+            if layer_results:
+                x, padding_mask = self.w2v_model.extract_features(**w2v_args)
+                layer_x = None
+            else:
+                x, padding_mask, layer_x = self.w2v_model.extract_features(**w2v_args)
 
             if tbc:
                 # B x T x C -> T x B x C
@@ -394,6 +399,7 @@ class Wav2VecEncoder(FairseqEncoder):
             "encoder_out": x,  # T x B x C
             "encoder_padding_mask": padding_mask,  # B x T
             "padding_mask": padding_mask,
+            "layer_results": layer_x
         }
 
     def reorder_encoder_out(self, encoder_out, new_order):
