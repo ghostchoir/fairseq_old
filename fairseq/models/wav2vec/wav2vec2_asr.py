@@ -193,7 +193,7 @@ class Wav2VecCtc(BaseFairseqModel):
         self.args = args
 
         if args.quantize:
-            from lsqplus_quantize_V1 import add_quant_ops
+            from fairseq.models.wav2vec.lsqplus_quantize_V1 import add_quant_ops
             add_quant_ops(self, a_bits=args.a_bits, w_bits=args.w_bits,
                           quant_inference=args.quant_inference, per_channel=args.per_channel,
                           all_positive=args.all_positive, batch_init=args.batch_init)

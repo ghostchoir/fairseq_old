@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Function
-from lsqquantize_V1 import Round
+from .lsqquantize_V1 import Round
 
 
 class ALSQPlus(Function):
