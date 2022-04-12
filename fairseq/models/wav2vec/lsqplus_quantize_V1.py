@@ -485,7 +485,7 @@ def prepare(model, inplace=False, a_bits=8, w_bits=8, quant_inference=False,
     return model
 
 
-def add_quant_ops(net, a_bits=8, w_bits=8, quant_inference=False, all_positive=False, per_channel=False, batch_init=20):
+def add_quant_ops(args, net, device, a_bits=8, w_bits=8, quant_inference=False, all_positive=False, per_channel=False, batch_init=20):
     for name, child in net.named_children():
         if isinstance(child, nn.Conv1d):
             #print(name, 'conv1d')
@@ -505,6 +505,13 @@ def add_quant_ops(net, a_bits=8, w_bits=8, quant_inference=False, all_positive=F
                                          a_bits=a_bits, w_bits=w_bits, quant_inference=quant_inference,
                                          all_positive=all_positive, per_channel=per_channel, batch_init=batch_init)
             quant_conv.weight.data = child.weight
+            if args.fp16:
+                quant_conv = quant_conv.half()
+            elif args.bf16:
+                quant_conv = quant_conv.to(dtype=torch.bfloat16)
+            if not args.pipeline_model_parallel:
+                quant_conv = quant_conv.to(device)
+            quant_conv = quant_conv.to(device)
             net._modules[name] = quant_conv
             # setattr(net, name, quant_conv)
             # names = name.split('.')
@@ -530,6 +537,13 @@ def add_quant_ops(net, a_bits=8, w_bits=8, quant_inference=False, all_positive=F
                                          a_bits=a_bits, w_bits=w_bits, quant_inference=quant_inference,
                                          all_positive=all_positive, per_channel=per_channel, batch_init=batch_init)
             quant_conv.weight.data = child.weight
+            if args.fp16:
+                quant_conv = quant_conv.half()
+            elif args.bf16:
+                quant_conv = quant_conv.to(dtype=torch.bfloat16)
+            if not args.pipeline_model_parallel:
+                quant_conv = quant_conv.to(device)
+            quant_conv = quant_conv.to(device)
             net._modules[name] = quant_conv
             # names = name.split('.')
             # p = net
@@ -552,6 +566,13 @@ def add_quant_ops(net, a_bits=8, w_bits=8, quant_inference=False, all_positive=F
                                            all_positive=all_positive, per_channel=per_channel,
                                            batch_init=batch_init)
             quant_linear.weight.data = child.weight
+            if args.fp16:
+                quant_linear = quant_linear.half()
+            elif args.bf16:
+                quant_linear = quant_linear.to(dtype=torch.bfloat16)
+            if not args.pipeline_model_parallel:
+                quant_linear = quant_linear.to(device)
+            quant_linear = quant_linear.to(device)
             net._modules[name] = quant_linear
             # names = name.split('.')
             # p = net
