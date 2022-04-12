@@ -837,7 +837,8 @@ class TransformerEncoder(nn.Module):
         if padding_mask is not None:
             x[padding_mask] = 0
 
-        x_conv = self.pos_conv(x.transpose(1, 2))
+        x = x.transpose(1, 2)
+        x_conv = self.pos_conv(x)
         x_conv = x_conv.transpose(1, 2)
         x += x_conv
 
