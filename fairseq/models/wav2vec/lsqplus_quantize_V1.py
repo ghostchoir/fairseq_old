@@ -558,7 +558,7 @@ def add_quant_ops(args, net, device, a_bits=8, w_bits=8, quant_inference=False, 
                                            quant_inference=quant_inference,
                                            all_positive=all_positive, per_channel=per_channel,
                                            batch_init=batch_init)
-                quant_linear.weight.data = child.bias
+                quant_linear.bias.data = child.bias
             else:
                 quant_linear = QuantLinear(child.in_features, child.out_features,
                                            bias=False, a_bits=a_bits, w_bits=w_bits,
