@@ -192,12 +192,6 @@ class Wav2VecCtc(BaseFairseqModel):
         self.w2v_encoder = w2v_encoder
         self.args = args
 
-        if args.quantize:
-            from fairseq.models.wav2vec.lsqplus_quantize_V1 import add_quant_ops
-            add_quant_ops(self, a_bits=args.a_bits, w_bits=args.w_bits,
-                          quant_inference=args.quant_inference, per_channel=args.per_channel,
-                          all_positive=args.all_positive, batch_init=args.batch_init)
-
     def upgrade_state_dict_named(self, state_dict, name):
         super().upgrade_state_dict_named(state_dict, name)
         return state_dict

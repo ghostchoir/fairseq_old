@@ -114,6 +114,12 @@ def main(args):
         disable_iterator_cache=task.has_sharded_data("train"),
     )
 
+    if args.quantize:
+        from fairseq.models.wav2vec.lsqplus_quantize_V1 import add_quant_ops
+        add_quant_ops(model, a_bits=args.a_bits, w_bits=args.w_bits,
+                      quant_inference=args.quant_inference, per_channel=args.per_channel,
+                      all_positive=args.all_positive, batch_init=args.batch_init)
+
     # Train until the learning rate gets too small
     max_epoch = args.max_epoch or math.inf
     lr = trainer.get_lr()
