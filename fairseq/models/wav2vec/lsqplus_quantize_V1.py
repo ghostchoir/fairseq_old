@@ -487,8 +487,8 @@ def prepare(model, inplace=False, a_bits=8, w_bits=8, quant_inference=False,
 
 def add_quant_ops(net, a_bits=8, w_bits=8, quant_inference=False, all_positive=False, per_channel=False, batch_init=20):
     for name, child in net.named_children():
-        if isinstance(child, Conv1d):
-            print(name, 'conv1d')
+        if isinstance(child, nn.Conv1d):
+            #print(name, 'conv1d')
             if child.bias is not None:
                 quant_conv = QuantConv1d(child.in_channels, child.out_channels,
                                          child.kernel_size, stride=child.stride,
@@ -512,8 +512,8 @@ def add_quant_ops(net, a_bits=8, w_bits=8, quant_inference=False, all_positive=F
             # for n in names:
             #    p = getattr(p, n)
             # p = quant_conv
-        elif isinstance(child, Conv2d):
-            print(name, 'conv2d')
+        elif isinstance(child, nn.Conv2d):
+            #print(name, 'conv2d')
             if child.bias is not None:
                 quant_conv = QuantConv2d(child.in_channels, child.out_channels,
                                          child.kernel_size, stride=child.stride,
@@ -536,8 +536,8 @@ def add_quant_ops(net, a_bits=8, w_bits=8, quant_inference=False, all_positive=F
             # for n in names:
             #    p = getattr(p, n)
             # p = quant_conv
-        elif isinstance(child, Linear):
-            print(name, 'linear')
+        elif isinstance(child, nn.Linear):
+            #print(name, 'linear')
             if child.bias is not None:
                 quant_linear = QuantLinear(child.in_features, child.out_features,
                                            bias=True, a_bits=a_bits, w_bits=w_bits,
