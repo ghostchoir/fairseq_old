@@ -143,6 +143,41 @@ def add_common_args(parser):
         type=float,
         help="probability of dropping a layer in wav2vec 2.0",
     )
+    parser.add_argument(
+        "--quantize",
+        default=False,
+        action="store_true"
+    )
+    parser.add_argument(
+        "--a-bits",
+        type=int,
+        default=8
+    )
+    parser.add_argument(
+        "--w-bits",
+        type=int,
+        default=8
+    )
+    parser.add_argument(
+        "--quant-inference",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--all-positive",
+        default=False,
+        action="store_true"
+    )
+    parser.add_argument(
+        "--per-channel",
+        default=False,
+        action="store_true"
+    )
+    parser.add_argument(
+        "--batch-init",
+        type=int,
+        default=20
+    )
 
 
 @register_model("wav2vec_ctc")
@@ -156,6 +191,12 @@ class Wav2VecCtc(BaseFairseqModel):
         super().__init__()
         self.w2v_encoder = w2v_encoder
         self.args = args
+
+        if args.quantize:
+            from lsqplus_quantize_V1 import add_quant_ops
+            add_quant_ops(self, a_bits=args.a_bits, w_bits=args.w_bits,
+                          quant_inference=args.quant_inference, per_channel=args.per_channel,
+                          all_positive=args.all_positive, batch_init=args.batch_init)
 
     def upgrade_state_dict_named(self, state_dict, name):
         super().upgrade_state_dict_named(state_dict, name)
