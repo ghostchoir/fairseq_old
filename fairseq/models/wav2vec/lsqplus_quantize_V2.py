@@ -469,6 +469,8 @@ def prepare(model, inplace=False, a_bits=8, w_bits=8, quant_inference=False,
 def add_quant_ops(args, net, device, a_bits=8, w_bits=8, quant_inference=False, all_positive=False, per_channel=False,
                   batch_init=20):
     for name, child in net.named_children():
+        if args.exclude_conv and 'extractor' in name:
+            continue
         if isinstance(child, nn.Conv1d):
             # print(name, 'conv1d')
             if child.bias is not None:

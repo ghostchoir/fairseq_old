@@ -149,6 +149,11 @@ def add_common_args(parser):
         action="store_true"
     )
     parser.add_argument(
+        "--exclude-conv",
+        default=False,
+        action="store_true"
+    )
+    parser.add_argument(
         "--a-bits",
         type=int,
         default=8
