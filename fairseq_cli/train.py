@@ -120,6 +120,7 @@ def main(args):
         add_quant_ops(args, model, device, a_bits=args.a_bits, w_bits=args.w_bits,
                       quant_inference=args.quant_inference, per_channel=args.per_channel,
                       all_positive=args.all_positive, batch_init=args.batch_init)
+        trainer._build_optimizer()
 
     # Train until the learning rate gets too small
     max_epoch = args.max_epoch or math.inf
