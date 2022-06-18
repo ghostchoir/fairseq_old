@@ -592,9 +592,9 @@ class Wav2Vec2Model(BaseFairseqModel):
 
         if features_only:
             if layer_results:
-                return {"x": x, "layer_results": layer_x, "padding_mask": padding_mask}
+                return {"x": x, "layer_results": layer_x, "mask_indices": mask_indices, "padding_mask": padding_mask}
             else:
-                return {"x": x, "padding_mask": padding_mask}
+                return {"x": x, "padding_mask": padding_mask, "mask_indices": mask_indices}
 
         if self.quantizer:
             q = self.quantizer(y, produce_targets=False)
