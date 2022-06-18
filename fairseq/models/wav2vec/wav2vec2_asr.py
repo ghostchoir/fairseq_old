@@ -421,9 +421,9 @@ class Wav2VecEncoder(FairseqEncoder):
 
         with torch.no_grad() if not ft else contextlib.ExitStack():
             if layer_results:
-                x, padding_mask, layer_x = self.w2v_model.extract_features(**w2v_args)
+                x, padding_mask, mask_indices, layer_x = self.w2v_model.extract_features(**w2v_args)
             else:
-                x, padding_mask = self.w2v_model.extract_features(**w2v_args)
+                x, padding_mask, mask_indices = self.w2v_model.extract_features(**w2v_args)
                 layer_x = None
 
             if tbc:
@@ -439,7 +439,8 @@ class Wav2VecEncoder(FairseqEncoder):
             "encoder_out": x,  # T x B x C
             "encoder_padding_mask": padding_mask,  # B x T
             "padding_mask": padding_mask,
-            "layer_results": layer_x
+            "layer_results": layer_x,
+            "mask_indices": mask_indices
         }
 
     def reorder_encoder_out(self, encoder_out, new_order):

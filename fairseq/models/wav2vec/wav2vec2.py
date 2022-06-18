@@ -641,7 +641,7 @@ class Wav2Vec2Model(BaseFairseqModel):
         x = self.final_proj(x)
         x = self.compute_preds(x, y, negs)
 
-        result = {"x": x, "padding_mask": padding_mask, "features_pen": features_pen}
+        result = {"x": x, "padding_mask": padding_mask, "features_pen": features_pen, "mask_indices": mask_indices}
 
         if prob_ppl is not None:
             result["prob_perplexity"] = prob_ppl
@@ -661,9 +661,9 @@ class Wav2Vec2Model(BaseFairseqModel):
     def extract_features(self, source, padding_mask, mask=False, layer_results=False):
         res = self.forward(source, padding_mask, mask=mask, features_only=True, layer_results=layer_results)
         if layer_results:
-            return res["x"], res["padding_mask"], res["layer_results"]
+            return res["x"], res["padding_mask"], res["mask_indices"], res["layer_results"]
         else:
-            return res["x"], res["padding_mask"]
+            return res["x"], res["padding_mask"], res["mask_indices"]
 
     def get_logits(self, net_output):
         logits = net_output["x"]
