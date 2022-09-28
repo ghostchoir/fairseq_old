@@ -856,7 +856,7 @@ class TransformerEncoder(nn.Module):
         z = None
         for i, layer in enumerate(self.layers):
             dropout_probability = np.random.random()
-            if not self.training or (dropout_probability > self.layerdrop):
+            if not self.training or (dropout_probability > self.layerdrop) or i == 0:
                 x, z = layer(x, self_attn_padding_mask=padding_mask, need_weights=True if layer_results else False)
                 layer_x.append((x, z))
             else:
